@@ -4,15 +4,23 @@ import net.corda.cordform.CordformNode
 import net.corda.core.crypto.SecureHash
 import net.corda.core.internal.*
 import net.corda.core.node.NodeInfo
+import net.corda.core.serialization.internal.SerializationEnvironmentImpl
+import net.corda.core.serialization.internal._contextSerializationEnv
 import net.corda.core.serialization.serialize
 import net.corda.core.utilities.contextLogger
 import net.corda.core.utilities.seconds
+import net.corda.nodeapi.internal.NodeInfoAndSigned
 import net.corda.nodeapi.internal.SignedNodeInfo
 import net.corda.nodeapi.internal.network.NodeInfoFilesCopier
+import net.corda.nodeapi.internal.serialization.AMQP_P2P_CONTEXT
+import net.corda.nodeapi.internal.serialization.SerializationFactoryImpl
+import net.corda.nodeapi.internal.serialization.amqp.AMQPServerSerializationScheme
 import rx.Observable
 import rx.Scheduler
 import java.io.IOException
 import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 import kotlin.streams.toList
@@ -38,24 +46,19 @@ class NodeInfoWatcher(private val nodePath: Path,
 
     companion object {
         private val logger = contextLogger()
-        /**
-         * Saves the given [NodeInfo] to a path.
-         * The node is 'encoded' as a SignedNodeInfo, signed with the owning key of its first identity.
-         * The name of the written file will be "nodeInfo-" followed by the hash of the content. The hash in the filename
-         * is used so that one can freely copy these files without fearing to overwrite another one.
-         *
-         * @param path the path where to write the file, if non-existent it will be created.
-         * @param signedNodeInfo the signed NodeInfo.
-         */
-        fun saveToFile(path: Path, signedNodeInfo: SignedNodeInfo) {
-            try {
-                path.createDirectories()
-                signedNodeInfo.serialize()
-                        .open()
-                        .copyTo(path / "${NodeInfoFilesCopier.NODE_INFO_FILE_NAME_PREFIX}${signedNodeInfo.raw.hash}")
-            } catch (e: Exception) {
-                logger.warn("Couldn't write node info to file", e)
-            }
+
+        // TODO This method doesn't belong in this class
+        fun saveToFile(path: Path, nodeInfoAndSigned: NodeInfoAndSigned) {
+            // By using the hash of the node's first name we ensure:
+            // 1) node info files for the same node map to the same filename and thus avoid having duplicate files for
+            //    the same node
+            // 2) avoid having to deal with characters in the X.500 name which are incompatible with the local filesystem
+            val fileNameHash = nodeInfoAndSigned.nodeInfo.legalIdentities[0].name.serialize().hash
+            nodeInfoAndSigned
+                    .signed
+                    .serialize()
+                    .open()
+                    .copyTo(path / "${NodeInfoFilesCopier.NODE_INFO_FILE_NAME_PREFIX}$fileNameHash", REPLACE_EXISTING)
         }
     }
 
@@ -84,7 +87,10 @@ class NodeInfoWatcher(private val nodePath: Path,
                 .flatMapIterable { loadFromDirectory() }
     }
 
-    fun saveToFile(signedNodeInfo: SignedNodeInfo) = Companion.saveToFile(nodePath, signedNodeInfo)
+    // TODO This method doesn't belong in this class
+    fun saveToFile(nodeInfoAndSigned: NodeInfoAndSigned) {
+        return Companion.saveToFile(nodePath, nodeInfoAndSigned)
+    }
 
     /**
      * Loads all the files contained in a given path and returns the deserialized [NodeInfo]s.
@@ -124,4 +130,15 @@ class NodeInfoWatcher(private val nodePath: Path,
             null
         }
     }
+}
+
+// TODO Remove this once we have a tool that can read AMQP serialised files
+fun main(args: Array<String>) {
+    _contextSerializationEnv.set(SerializationEnvironmentImpl(
+            SerializationFactoryImpl().apply {
+                registerScheme(AMQPServerSerializationScheme())
+            },
+            AMQP_P2P_CONTEXT)
+    )
+    println(Paths.get(args[0]).readObject<SignedNodeInfo>().verified())
 }
