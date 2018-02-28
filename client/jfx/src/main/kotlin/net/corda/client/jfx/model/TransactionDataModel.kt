@@ -50,7 +50,7 @@ data class PartiallyResolvedTransaction(
                 vaultUpdates: ObservableMap<StateRef, StateAndRef<ContractState>>
         ) = PartiallyResolvedTransaction(
                 transaction = transaction,
-                inputs = transaction.tx.inputs.map { stateRef ->
+                inputs = transaction.inputs.map { stateRef ->
                     EasyBind.map(vaultUpdates.getObservableValue(stateRef)) {
                         if (it == null) {
                             InputResolution.Unresolved(stateRef)
@@ -66,7 +66,7 @@ data class PartiallyResolvedTransaction(
                 } else {
                     // Transaction will have the same number of outputs as inputs
                     val outputCount = transaction.coreTransaction.inputs.size
-                    val stateRefts = (0..outputCount).map { StateRef(transaction.id, it) }
+                    val stateRefts = (0 until outputCount).map { StateRef(transaction.id, it) }
                     stateRefts.map { stateRef ->
                         EasyBind.map(vaultUpdates.getObservableValue(stateRef)) {
                             if (it == null) {
@@ -88,7 +88,7 @@ data class PartiallyResolvedTransaction(
 class TransactionDataModel {
     private val transactions by observable(NodeMonitorModel::transactions)
     private val collectedTransactions = transactions.recordInSequence()
-    private val vaultUpdates by observable(NodeMonitorModel::vaultUpdates)
+    private val vaultUpdates by observable(NodeMonitorModel::states)
 
     private val stateMap = vaultUpdates.fold(FXCollections.observableHashMap<StateRef, StateAndRef<ContractState>>()) { map, update ->
         val states = update.consumed + update.produced

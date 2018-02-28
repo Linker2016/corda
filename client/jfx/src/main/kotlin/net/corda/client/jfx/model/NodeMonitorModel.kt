@@ -36,6 +36,9 @@ class NodeMonitorModel {
 
     private val stateMachineUpdatesSubject = PublishSubject.create<StateMachineUpdate>()
     private val vaultUpdatesSubject = PublishSubject.create<Vault.Update<ContractState>>()
+
+    private val allStatesSubject = PublishSubject.create<Vault.Update<ContractState>>()
+
     private val transactionsSubject = PublishSubject.create<SignedTransaction>()
     private val stateMachineTransactionMappingSubject = PublishSubject.create<StateMachineTransactionMapping>()
     private val progressTrackingSubject = PublishSubject.create<ProgressTrackingEvent>()
@@ -47,6 +50,8 @@ class NodeMonitorModel {
     val stateMachineTransactionMapping: Observable<StateMachineTransactionMapping> = stateMachineTransactionMappingSubject
     val progressTracking: Observable<ProgressTrackingEvent> = progressTrackingSubject
     val networkMap: Observable<MapChange> = networkMapSubject
+
+    val states: Observable<Vault.Update<ContractState>> = allStatesSubject
 
     val proxyObservable = SimpleObjectProperty<CordaRPCOps?>()
     lateinit var notaryIdentities: List<Party>
@@ -98,8 +103,19 @@ class NodeMonitorModel {
         val initialVaultUpdate = Vault.Update(setOf(), vaultSnapshot.states.toSet())
         vaultUpdates.startWith(initialVaultUpdate).subscribe(vaultUpdatesSubject)
 
+        val (allStatesSnapshot, allStatesUpdates) = proxy.vaultTrackBy<ContractState>(
+                QueryCriteria.VaultQueryCriteria(Vault.StateStatus.ALL),
+                PageSpecification(DEFAULT_PAGE_NUM, MAX_PAGE_SIZE)
+        )
+
+        val initial = Vault.Update(setOf(), allStatesSnapshot.states.toSet())
+        println("Initial vault updates: ${initial.produced.map {  "${it.ref} - ${it.state.contract}" }.joinToString(",")}")
+
+        allStatesUpdates.startWith(initial).subscribe(allStatesSubject)
+
         // Transactions
         val (transactions, newTransactions) = proxy.internalVerifiedTransactionsFeed()
+        println("Initial tranasctions: ${transactions.map { "${it.id} - ${it.coreTransaction.javaClass.simpleName}"}.joinToString()}")
         newTransactions.startWith(transactions).subscribe(transactionsSubject)
 
         // SM -> TX mapping
